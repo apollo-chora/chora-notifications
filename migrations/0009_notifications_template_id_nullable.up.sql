@@ -1,0 +1,14 @@
+-- 0009_notifications_template_id_nullable.up.sql
+--
+-- Event-driven fan-out (ADR-171) materialises in-app notifications from inline
+-- rendered copy (title/body in payload), NOT from a stored NotificationTemplate.
+-- The original schema declared `template_id UUID NOT NULL REFERENCES templates`,
+-- which made every notification require a per-tenant template row — impossible
+-- for the fan-out (dynamic tenants, no template). This relaxes template_id to
+-- NULLable so template-less, inline-rendered notifications are valid. The FK is
+-- retained: a non-NULL template_id still must reference an existing template
+-- (NULL skips the FK check), so user-authored template-driven notifications are
+-- unaffected.
+--
+-- Idempotent: ALTER ... DROP NOT NULL is a no-op if already nullable.
+ALTER TABLE notifications ALTER COLUMN template_id DROP NOT NULL;

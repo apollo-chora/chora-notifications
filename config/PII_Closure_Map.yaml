@@ -1,0 +1,94 @@
+# PII_Closure_Map for chora-notifications domain.
+#
+# Source-of-truth: .claude/skills/account-closure-saga/SKILL.md
+# Owning team: Team 3 (Platform). Owning DB: chora_notifications.
+#
+# Notifications hosts the Notification + Template + DeliveryReceipt +
+# Subscription + FamiliarNudge / DailyDose aggregates.
+#
+# Notification rows are DROP-on-user-closure (no reason to retain a closed
+# user's "Your password reset email at 10:32" log entries). Aggregate
+# delivery rate KPIs survive in anonymised form.
+
+domain: chora_notifications
+version: "1.0"
+
+fields_to_tokenize:
+  - table: notifications
+    columns:
+      # Body + subject often contain personal data — drop entirely.
+      - column: subject
+        strategy: drop
+        value: ""
+      - column: body
+        strategy: drop
+        value: ""
+      - column: recipient_email
+        strategy: tombstone_email
+        value: "user-{hash}@redacted.invalid"
+      - column: recipient_phone
+        strategy: drop
+        value: ""
+      - column: recipient_display_name
+        strategy: tombstone_string
+        value: "Former member"
+      # delivery_status, sent_at, channel preserved for KPI aggregates.
+
+  - table: delivery_receipts
+    columns:
+      - column: recipient_display_name
+        strategy: tombstone_string
+        value: "Former member"
+      # bounce_reason etc preserved for delivery quality metrics.
+
+  - table: subscription_preferences
+    columns:
+      # Per-user opt-in matrix — CASCADE on user closure (it's their
+      # preferences; gone with the user).
+      - column: subject_display_name
+        strategy: tombstone_string
+        value: "Former member"
+
+  - table: familiar_nudges
+    columns:
+      # Per-user nudge cadence — cascade-drop content + display.
+      - column: subject_display_name
+        strategy: tombstone_string
+        value: "Former member"
+      - column: nudge_text
+        strategy: drop
+        value: ""
+
+  - table: daily_dose_compositions
+    columns:
+      # Comic Ch P daily-dose composer per-user — drop content.
+      - column: subject_display_name
+        strategy: tombstone_string
+        value: "Former member"
+      - column: composition_json
+        strategy: drop
+        value: ""
+
+  - table: webhook_subscriptions
+    columns:
+      # Webhook URLs are personal endpoints — drop on closure.
+      - column: webhook_url
+        strategy: drop
+        value: ""
+      - column: subscriber_display_name
+        strategy: tombstone_string
+        value: "Former member"
+
+retention_days_by_jurisdiction:
+  EU: 2557
+  SG: 2557
+  US: 1826
+  ZA: 1826
+  BR: 1826
+  default: 2557
+
+on_creator_closure:
+  # Notifications are WRITTEN BY system/templates, not authored by users.
+  # User-closure cascades drops the user's notifications + nudges.
+  strategy: cascade_pseudonymise
+  show_authorship_as: "Former member"
