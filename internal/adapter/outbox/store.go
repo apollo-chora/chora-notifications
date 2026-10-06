@@ -29,8 +29,7 @@
 //   - Store — port that wraps the notifications_outbox_events table.
 //     InMemoryStore + PostgresStore implementations.
 //   - Publisher — satisfies the existing chora-notifications event-publisher
-//     shape (unsubscribe.EventPublisher — Publish(ctx, topic, event)) by
-//     writing to Store.
+//     shape (Publish(ctx, topic, event)) by writing to Store.
 //   - Dispatcher — drains Store to a Bus (production: NATS JetStream) with
 //     retry + DLQ.
 //

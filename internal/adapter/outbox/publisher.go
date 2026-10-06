@@ -1,8 +1,7 @@
 // Package outbox — TransactionalOutboxPublisher implementation.
 //
 // TransactionalOutboxPublisher satisfies the chora-notifications event-publisher
-// shape (Publish(ctx, topic string, event any) error — matching the existing
-// unsubscribe.EventPublisher interface) by writing the event to the
+// shape (Publish(ctx, topic string, event any) error) by writing the event to the
 // notifications_outbox_events table instead of publishing directly to Pub/Sub.
 // The Dispatcher (see dispatcher.go) drains the table to Cloud Pub/Sub on a
 // separate goroutine. This decouples event emission from Pub/Sub availability
@@ -93,9 +92,9 @@ func NewPublisher(cfg PublisherConfig) *Publisher {
 	return &Publisher{cfg: cfg}
 }
 
-// Publish satisfies the unsubscribe.EventPublisher interface. Writes the event
-// as a pending row in notifications_outbox_events. The Dispatcher publishes
-// to Pub/Sub asynchronously.
+// Publish satisfies the chora-notifications event-publisher shape. Writes the
+// event as a pending row in notifications_outbox_events. The Dispatcher
+// publishes to Pub/Sub asynchronously.
 //
 // The event argument MUST be JSON-marshalable; the publisher reflects on it
 // to extract canonical envelope fields (tenant_id, gcid, idempotency_key,
@@ -114,8 +113,7 @@ func (p *Publisher) Publish(ctx context.Context, topic string, event any) error 
 	// Marshal the event up-front so we can both serialize the payload AND
 	// reflect to extract envelope fields. We choose JSON because every
 	// existing chora-notifications publisher call site already constructs
-	// JSON-shaped maps / structs (see unsubscribe.consentWithdrawnEvent +
-	// events.DomainEvent).
+	// JSON-shaped maps / structs.
 	payloadBytes, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("outbox: marshal payload: %w", err)
@@ -195,7 +193,7 @@ func (p *Publisher) Publish(ctx context.Context, topic string, event any) error 
 	return p.cfg.Store.Insert(ctx, row)
 }
 
-// Close satisfies the unsubscribe.EventPublisher interface — the outbox
+// Close satisfies the chora-notifications event-publisher shape — the outbox
 // publisher itself has no resources to release (the underlying Store is
 // owned by the bootstrap wiring).
 func (p *Publisher) Close() error {

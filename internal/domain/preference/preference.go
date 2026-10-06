@@ -103,8 +103,8 @@ func (p *SubscriberPreference) Validate() error {
 
 // GetEnabledChannels returns the list of enabled notification channels.
 //
-// Iteration order is stable: in_app, push, email (matching the InApp-first
-// fan-out convention in familiar_nudge.DailyDoseComposer).
+// Iteration order is stable: in_app, push, email (InApp-first fan-out
+// convention).
 func (p *SubscriberPreference) GetEnabledChannels() []notification.Channel {
 	out := make([]notification.Channel, 0, 3)
 	if p.InAppEnabled {

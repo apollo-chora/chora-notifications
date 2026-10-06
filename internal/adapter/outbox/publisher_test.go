@@ -1,9 +1,8 @@
 // Package outbox_test — TransactionalOutboxPublisher adapter tests.
 //
 // TransactionalOutboxPublisher satisfies the chora-notifications event-publisher
-// shape (Publish(ctx, topic string, event any) error — matching
-// unsubscribe.EventPublisher) by writing the event to the
-// notifications_outbox_events table (via the Store port) instead of publishing
+// shape (Publish(ctx, topic string, event any) error) by writing the event to
+// the notifications_outbox_events table (via the Store port) instead of publishing
 // directly to Pub/Sub. A separate Dispatcher drains the outbox to Cloud
 // Pub/Sub. This decouples event emission from Pub/Sub availability: a crash
 // between the domain mutation and Publish no longer loses events because the
@@ -27,7 +26,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/apollo-chora/chora-notifications/internal/adapter/outbox"
-	"github.com/apollo-chora/chora-notifications/internal/domain/unsubscribe"
 )
 
 func TestOutboxPublisher_Publish_WritesRowToStore(t *testing.T) {
@@ -327,10 +325,6 @@ func TestOutboxPublisher_Publish_EventTypeOverrideTakesPrecedence(t *testing.T) 
 		t.Errorf("EventType = %q; want override value", rows[0].EventType)
 	}
 }
-
-// Compile-time check that Publisher satisfies the unsubscribe.EventPublisher
-// interface (the existing chora-notifications event-publisher shape).
-var _ unsubscribe.EventPublisher = (*outbox.Publisher)(nil)
 
 // Sanity check: the Close() noop on Publisher is non-failing.
 func TestOutboxPublisher_Close_NoOp(t *testing.T) {
