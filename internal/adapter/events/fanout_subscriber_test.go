@@ -58,6 +58,8 @@ func TestSubscriptionName(t *testing.T) {
 		"chora.delivery.application.offer_made.v1": "chora-notifications.delivery-application-offer_made",
 		// F-I1 (ADR-228 incubation): the stirring egg nudge.
 		"chora.consumption.familiar.stirring.v1": "chora-notifications.consumption-familiar-stirring",
+		// ADR-254: canonical companion subject (chora-consumption emits this).
+		"chora.consumption.companion.stirring.v1": "chora-notifications.consumption-companion-stirring",
 	}
 	for topic, want := range cases {
 		if got := events.SubscriptionName(topic); got != want {
@@ -66,7 +68,7 @@ func TestSubscriptionName(t *testing.T) {
 	}
 }
 
-func TestBuildPhaseARegistry_HasFourTopics(t *testing.T) {
+func TestBuildPhaseARegistry_HasFiveTopics(t *testing.T) {
 	reg, err := events.BuildPhaseARegistry()
 	if err != nil {
 		t.Fatalf("err = %v", err)
@@ -76,6 +78,8 @@ func TestBuildPhaseARegistry_HasFourTopics(t *testing.T) {
 		"chora.delivery.submission.graded.v1",
 		"chora.sharing.relationship.followed.v1",
 		// F-I1 owed follow-up: the incubation "your egg is stirring!" nudge.
+		// ADR-254: canonical companion subject + legacy familiar subject.
+		"chora.consumption.companion.stirring.v1",
 		"chora.consumption.familiar.stirring.v1",
 	}
 	for _, topic := range want {
@@ -83,8 +87,8 @@ func TestBuildPhaseARegistry_HasFourTopics(t *testing.T) {
 			t.Errorf("registry missing %q", topic)
 		}
 	}
-	if len(reg.Topics()) != 4 {
-		t.Errorf("topics = %d want 4", len(reg.Topics()))
+	if len(reg.Topics()) != 5 {
+		t.Errorf("topics = %d want 5", len(reg.Topics()))
 	}
 }
 
@@ -122,6 +126,44 @@ func TestBuildPhaseARegistry_StirringSpec(t *testing.T) {
 	// in_app-only nudge: no email template (gamification is EmailNever).
 	if spec.EmailTemplateID != "" {
 		t.Errorf("stirring spec must not be email-eligible; got template %q", spec.EmailTemplateID)
+	}
+}
+
+// TestBuildPhaseARegistry_CompanionStirringSpec pins the ADR-254 canonical
+// stirring Spec: chora-consumption emits chora.consumption.companion.stirring.v1
+// (proto/events/consumption/companion.proto), so the registry must carry the
+// same in_app egg-owner nudge for the canonical subject. The legacy
+// familiar.stirring.v1 spec stays registered alongside it.
+func TestBuildPhaseARegistry_CompanionStirringSpec(t *testing.T) {
+	reg, err := events.BuildPhaseARegistry()
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	spec, ok := reg.Lookup("chora.consumption.companion.stirring.v1")
+	if !ok {
+		t.Fatal("registry missing companion stirring spec")
+	}
+	if spec.Category != trigger.CategoryGamification {
+		t.Errorf("category = %q want gamification", spec.Category)
+	}
+	if spec.Priority != trigger.PriorityNormal {
+		t.Errorf("priority = %q want normal", spec.Priority)
+	}
+	if len(spec.Channels) != 1 || spec.Channels[0] != notification.ChannelInApp {
+		t.Errorf("channels = %v want [in_app]", spec.Channels)
+	}
+	if _, isEnvelope := spec.Recipient.(fanout.EnvelopeRecipient); !isEnvelope {
+		t.Errorf("recipient = %T want fanout.EnvelopeRecipient", spec.Recipient)
+	}
+	if strings.TrimSpace(spec.Title) == "" || strings.TrimSpace(spec.Body) == "" {
+		t.Errorf("stirring spec must carry copy: title=%q body=%q", spec.Title, spec.Body)
+	}
+	if spec.EmailTemplateID != "" {
+		t.Errorf("stirring spec must not be email-eligible; got template %q", spec.EmailTemplateID)
+	}
+	// Legacy subject must remain subscribed during the rename transition.
+	if _, ok := reg.Lookup("chora.consumption.familiar.stirring.v1"); !ok {
+		t.Error("registry must keep the legacy familiar stirring spec alongside")
 	}
 }
 
@@ -166,6 +208,53 @@ func TestHandlerFor_Stirring_PersistsForOwner(t *testing.T) {
 	}
 	if got, ok := n.Payload["source_topic"].(string); !ok || got != "chora.consumption.familiar.stirring.v1" {
 		t.Errorf("payload source_topic = %v want the stirring topic", n.Payload["source_topic"])
+	}
+	if got, ok := n.Payload["category"].(string); !ok || got != string(trigger.CategoryGamification) {
+		t.Errorf("payload category = %v want gamification", n.Payload["category"])
+	}
+	if title, _ := n.Payload["title"].(string); strings.TrimSpace(title) == "" {
+		t.Errorf("payload title is empty; want the stirring headline")
+	}
+	if pub.calls != 1 {
+		t.Errorf("lifecycle publishes = %d want 1 (drives push fan-out)", pub.calls)
+	}
+}
+
+// TestHandlerFor_CompanionStirring_PersistsForOwner drives the real fan-out
+// subscriber over the ADR-254 canonical companion stirring topic — the subject
+// chora-consumption actually emits — and asserts the same end-to-end contract
+// as the familiar variant: an in_app notification materialised for the egg
+// OWNER (envelope.gcid) with the stirring copy + source topic.
+func TestHandlerFor_CompanionStirring_PersistsForOwner(t *testing.T) {
+	svc, repo, pub := newSvc(t)
+	sub := events.NewFanoutSubscriber(svc)
+	h := sub.HandlerFor("chora.consumption.companion.stirring.v1")
+
+	const ownerGCID = "22222222-2222-7222-8222-222222222222"
+	msg := eventbus.Message{
+		Envelope: cgcenvelope.Envelope{
+			TenantID:       "tenant-1",
+			GCID:           ownerGCID,
+			IdempotencyKey: "stirring:companion-egg",
+			Traceparent:    "00-trace-span-01",
+		},
+	}
+	if err := h(context.Background(), msg); err != nil {
+		t.Fatalf("handler err = %v", err)
+	}
+	got, _ := repo.List(context.Background(), "tenant-1", notifFilter(ownerGCID))
+	if len(got) != 1 {
+		t.Fatalf("persisted %d notifications; want 1", len(got))
+	}
+	n := got[0]
+	if n.RecipientGcid != ownerGCID {
+		t.Errorf("recipient = %q want %q", n.RecipientGcid, ownerGCID)
+	}
+	if n.Channel != notification.ChannelInApp {
+		t.Errorf("channel = %q want in_app", n.Channel)
+	}
+	if got, ok := n.Payload["source_topic"].(string); !ok || got != "chora.consumption.companion.stirring.v1" {
+		t.Errorf("payload source_topic = %v want the companion stirring topic", n.Payload["source_topic"])
 	}
 	if got, ok := n.Payload["category"].(string); !ok || got != string(trigger.CategoryGamification) {
 		t.Errorf("payload category = %v want gamification", n.Payload["category"])

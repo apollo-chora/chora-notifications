@@ -119,17 +119,20 @@ func (d IdempotentDeduper) Process(ctx context.Context, key string, fn func() er
 // protofield extractor is injected into the payload-recipient resolver here
 // (the wiring layer) so the domain stays adapter-free.
 //
-// Four events (see ADR-171; relationship.followed per ADR-230 D4):
+// Five events (see ADR-171; relationship.followed per ADR-230 D4):
 //   - certification.issued    → learner (envelope.gcid)
 //   - submission.graded       → learner (envelope.gcid)
 //   - relationship.followed   → followee (payload field 3)
-//   - familiar.stirring       → egg owner (envelope.gcid) — F-I1 / ADR-228
+//   - companion.stirring      → egg owner (envelope.gcid) — F-I1 / ADR-228,
+//     canonical subject per ADR-254
+//   - familiar.stirring       → egg owner (envelope.gcid) — legacy subject,
+//     kept alongside for producers still on the pre-ADR-254 name
 //
 // Phase B (P4) widens the two transactional-learner events to the email channel
 // (training + assessment are EmailAlways in DefaultEmailCategoryMatrix); each
 // carries its EmailTemplateID seed slug. relationship.followed +
-// familiar.stirring stay in_app-only — social + gamification are EmailNever,
-// so an email channel there would be gated off anyway.
+// companion/familiar.stirring stay in_app-only — social + gamification are
+// EmailNever, so an email channel there would be gated off anyway.
 //
 // learning_path.completed is intentionally NOT here: it is blocked by a
 // consumption-side topic-name bug (publishes to a non-existent topic). Adding
@@ -182,6 +185,22 @@ func BuildPhaseARegistry() (*fanout.Registry, error) {
 		// proto schema. Category gamification (the Familiar companion lifecycle) is
 		// EmailNever, so this stays in_app-only; the in_app.created.v1 emit fans it
 		// out to push automatically via the push dispatcher.
+		//
+		// ADR-254: `companion` is the canonical aggregate name (replacing
+		// `familiar`); chora-consumption emits chora.consumption.companion.
+		// stirring.v1 (proto/events/consumption/companion.proto). Both subjects
+		// are registered so the fan-out works during the rename transition —
+		// the legacy familiar.* subscription is dropped once no producer emits
+		// it anymore.
+		fanout.Spec{
+			Topic:     "chora.consumption.companion.stirring.v1",
+			Category:  trigger.CategoryGamification,
+			Priority:  trigger.PriorityNormal,
+			Channels:  []notification.Channel{notification.ChannelInApp},
+			Recipient: fanout.EnvelopeRecipient{},
+			Title:     "Your egg is stirring!",
+			Body:      "Your Familiar egg has gathered enough energy to hatch. Tap to bring your new companion to life.",
+		},
 		fanout.Spec{
 			Topic:     "chora.consumption.familiar.stirring.v1",
 			Category:  trigger.CategoryGamification,
